@@ -10,14 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
-func main() {
-	client := s3.New(&aws.Config{
-		Region: aws.String("us-west-2"),
-	})
-	downloader := s3manager.NewDownloader(&s3manager.DownloadOptions{
-		S3: client,
-	})
-
+func LatestLogFilesList(client *s3.S3, downloader *s3manager.Downloader, numLogs int) ([]string, error) {
 	params := &s3.ListObjectsInput{
 		Bucket:  aws.String("lattice-logs"),
 		MaxKeys: aws.Int64(1<<31 - 1),
@@ -33,26 +26,53 @@ func main() {
 	})
 
 	if err != nil {
-		fmt.Println(err.Error())
-		return
+		return []string{}, err
 	}
 
-	latestLogFiles := logFiles[len(logFiles)-21 : len(logFiles)-1]
+	return logFiles[len(logFiles)-numLogs-1 : len(logFiles)-1], nil
+}
 
+func GetLogLines(client *s3.S3, downloader *s3manager.Downloader, logFiles []string) ([]string, error) {
 	buffer := &aws.WriteAtBuffer{}
-	for _, f := range latestLogFiles {
+	for i, f := range logFiles {
+		if i > 0 {
+			fmt.Printf("\033[1A")
+		}
+		fmt.Printf("Downloading log %d of 10000...\n", i+1)
 		_, err := downloader.Download(buffer, &s3.GetObjectInput{
 			Bucket: aws.String("lattice-logs"),
 			Key:    aws.String(f),
 		})
 		if err != nil {
-			fmt.Println(err.Error())
-			return
+			return []string{}, err
 		}
 	}
 
-	logs := strings.Split(string(buffer.Bytes()), "\n")
-	ips := []string{}
+	return strings.Split(string(buffer.Bytes()), "\n"), nil
+}
+
+func main() {
+	client := s3.New(&aws.Config{
+		Region: aws.String("us-west-2"),
+	})
+	downloader := s3manager.NewDownloader(&s3manager.DownloadOptions{
+		S3: client,
+	})
+
+	logFiles, err := LatestLogFilesList(client, downloader, 10000)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+
+	var logs []string
+	logs, err = GetLogLines(client, downloader, logFiles)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+
+	ips := map[string]uint{}
 	reConcourse := regexp.MustCompile("^.*user/lattice-concourse.*$")
 	reIP := regexp.MustCompile(`^.* ((\d+\.){3}\d+) .*$`)
 	for _, l := range logs {
@@ -64,8 +84,6 @@ func main() {
 		if len(matches) < 2 {
 			continue
 		}
-		ips = append(ips, matches[1])
+		ips[matches[1]]++
 	}
-
-	fmt.Println(ips)
 }
