@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -47,7 +49,23 @@ func main() {
 			fmt.Println(err.Error())
 			return
 		}
-
-		fmt.Println(string(buffer.Bytes()))
 	}
+
+	logs := strings.Split(string(buffer.Bytes()), "\n")
+	ips := []string{}
+	reConcourse := regexp.MustCompile("^.*user/lattice-concourse.*$")
+	reIP := regexp.MustCompile(`^.* ((\d+\.){3}\d+) .*$`)
+	for _, l := range logs {
+		if reConcourse.MatchString(l) {
+			continue
+		}
+
+		matches := reIP.FindStringSubmatch(l)
+		if len(matches) < 2 {
+			continue
+		}
+		ips = append(ips, matches[1])
+	}
+
+	fmt.Println(ips)
 }
