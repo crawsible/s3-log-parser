@@ -38,7 +38,7 @@ func GetLogLines(client *s3.S3, downloader *s3manager.Downloader, logFiles []str
 		if i > 0 {
 			fmt.Printf("\033[1A")
 		}
-		fmt.Printf("Downloading log %d of 10000...\n", i+1)
+		fmt.Printf("Downloading log %d of %d...\n", i+1, len(logFiles))
 		_, err := downloader.Download(buffer, &s3.GetObjectInput{
 			Bucket: aws.String("lattice-logs"),
 			Key:    aws.String(f),
@@ -59,7 +59,7 @@ func main() {
 		S3: client,
 	})
 
-	logFiles, err := LatestLogFilesList(client, downloader, 10000)
+	logFiles, err := LatestLogFilesList(client, downloader, 10)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
@@ -72,18 +72,48 @@ func main() {
 		return
 	}
 
-	ips := map[string]uint{}
-	reConcourse := regexp.MustCompile("^.*user/lattice-concourse.*$")
+	IPs := map[string]int{}
+	//reConcourse := regexp.MustCompile("^.*user/lattice-concourse.*$")
 	reIP := regexp.MustCompile(`^.* ((\d+\.){3}\d+) .*$`)
+	TotalDownloads := 0
 	for _, l := range logs {
-		if reConcourse.MatchString(l) {
-			continue
-		}
+		//if reConcourse.MatchString(l) {
+		//continue
+		//}
 
 		matches := reIP.FindStringSubmatch(l)
 		if len(matches) < 2 {
 			continue
 		}
-		ips[matches[1]]++
+
+		TotalDownloads++
+		IPs[matches[1]]++
 	}
+
+	fmt.Println(IPs)
+
+	AWSIPRanges, err := GetAWSPublicIPRanges()
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+
+	AWSDownloads := 0
+	for IP := range IPs {
+		IPValue, err := getIPValue(IP)
+		if err != nil {
+			fmt.Println(err.Error())
+			return
+		}
+
+		for _, IPRange := range AWSIPRanges {
+			if IPValue >= IPRange[0] && IPValue < IPRange[1] {
+				AWSDownloads += IPs[IP]
+				break
+			}
+		}
+	}
+
+	fmt.Println("Total Downloads: ", TotalDownloads)
+	fmt.Println("AWS Downloads:   ", AWSDownloads)
 }
